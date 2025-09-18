@@ -1,8 +1,6 @@
-use std::ffi::CString;
 use std::io::{stdin, stdout, Write};
-use std::{env, ptr};
+use std::env;
 use executor::execute_command;
-use parser::{tokenize, Token}; 
 
 mod executor;
 mod parser;
@@ -13,24 +11,16 @@ fn main() {
 
         let mut input: String = String::new();
         stdin().read_line(&mut input).unwrap();
+        let command = input.trim();
 
-        let trimmed = input.trim();
-        if trimmed.is_empty() {
+        if command.is_empty() {
             continue;
         }
+        if command == "exit" {
+            break;
+        }
 
-        // only works when you put in the whole /path/to/program
-        let program = CString::new(trimmed).unwrap();
-        println!("Executing: {}", program.to_str().unwrap());
-        // the program also needs to be in the args
-        let arg0 = CString::new(trimmed).unwrap();
-        // let arg1 = CString::new("-al").unwrap();
-
-        let args = vec![arg0.as_ptr(), ptr::null()];
-
-        let command: Vec<Token> = tokenize(trimmed);
-        execute_command(command,program,args);
-
+        execute_command(command);
     }
 }
 
