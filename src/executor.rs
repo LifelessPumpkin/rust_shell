@@ -1,19 +1,21 @@
 use std::{ffi::CString, ptr};
-use libc::dup2;
+use libc::{close, dup2, open, O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY, STDIN_FILENO, STDOUT_FILENO};
 use nix::libc::{execv, fork, waitpid, pipe};
 use crate::parser::{expand_tokens, tokenize};
 
 struct CommandPart {
     program: CString,
     args: Vec<CString>,
-    direction: Option<Direction>,
+    redir_in: Option<String>,   // e.g. < input.txt
+    redir_out: Option<String>,  // e.g. > output.txt
+    direction: Option<Direction>, // still keep this for pipes or future chaining
     background: bool,
 }
 
 enum Direction {
     Pipe,
-    RedirOut(String), // file name
-    RedirIn(String),  // file name
+    // RedirOut(String), // file name
+    // RedirIn(String),  // file name
     // maybe in future: AndThen, OrElse, Sequence
     
 }
@@ -24,10 +26,10 @@ impl PartialEq for Direction {
             // Compare only the discriminant (variant name) for Pipe
             (Direction::Pipe, Direction::Pipe) => true,
             // Compare RedirOut and RedirIn by their inner String values
-            (Direction::RedirOut(s1), Direction::RedirOut(s2)) => s1 == s2,
-            (Direction::RedirIn(s1), Direction::RedirIn(s2)) => s1 == s2,
+            // (Direction::RedirOut(s1), Direction::RedirOut(s2)) => s1 == s2,
+            // (Direction::RedirIn(s1), Direction::RedirIn(s2)) => s1 == s2,
             // All other combinations are not equal
-            _ => false,
+            // _ => false,
         }
     }
 }
@@ -45,7 +47,9 @@ pub fn execute_command(command: &str) {
 fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
     let mut command_parts: Vec<CommandPart> = Vec::new();
     let mut current_part: Option<CommandPart> = None;
-    for t in tokens.iter() {
+
+    let mut tokens_iter = tokens.iter().peekable();
+    while let Some(t) = tokens_iter.next() {
         // The first token is always the program
         // The rest are arguments until I hit a special token
 
@@ -54,6 +58,8 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
             current_part = Some(CommandPart {
                 program: t.clone(),
                 args: Vec::new(),
+                redir_in: None,
+                redir_out: None,
                 direction: None,
                 background: false,
             });
@@ -74,9 +80,18 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
             current_part = None;
             // execute_piped(cmds);
         } else if t.to_str().unwrap() == ">" {
-            // Handle redirection
-        } else if t.to_str().unwrap() == "<" {
-            // Handle input redirection
+            current_part.as_mut().unwrap().args.pop(); // remove ">" from args
+            if let Some(next_token) = tokens_iter.next() {
+                let filename = next_token.to_str().unwrap().to_string();
+                current_part.as_mut().unwrap().redir_out = Some(filename);
+            }
+        }
+        else if t.to_str().unwrap() == "<" {
+            current_part.as_mut().unwrap().args.pop(); // remove "<" from args
+            if let Some(next_token) = tokens_iter.next() {
+                let filename = next_token.to_str().unwrap().to_string();
+                current_part.as_mut().unwrap().redir_in = Some(filename);
+            }
         } else if t.to_str().unwrap() == "&" {
             current_part.as_mut().unwrap().background = true;
             // Remove the & from args
@@ -128,7 +143,6 @@ fn execute(command_parts: Vec<CommandPart>) {
 
                 // Add the rest of the args
                 for arg in command_parts[0].args.iter() {
-                    // println!("Arg: {}", CString::from_raw(*arg as *mut i8).to_str().unwrap());
                     argv.push(arg.as_ptr());
                 }
                 // Null terminate the args
@@ -170,24 +184,43 @@ fn execute(command_parts: Vec<CommandPart>) {
                     panic!("fork failed!");
                 } else if pid == 0 {
                     // CHILD
+                if let Some(filename) = &part.redir_out {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o644);
+                    if fd == -1 {
+                        panic!("open for redir out failed!");
+                    }
+                    dup2(fd, STDOUT_FILENO);
+                    close(fd);
+                }
+
+                if let Some(filename) = &part.redir_in {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_RDONLY);
+                    if fd == -1 {
+                        panic!("open for redir in failed!");
+                    }
+                    dup2(fd, STDIN_FILENO);
+                    close(fd);
+                }
 
                     // If there was a previous pipe, set stdin to its read end
                     if let Some(fd) = previous_fd {
-                        dup2(fd, libc::STDIN_FILENO);
+                        dup2(fd, STDIN_FILENO);
                     }
 
                     // If we're piping to the next, set stdout to this pipe's write end
                     if use_pipe {
-                        dup2(pipe_fds[1], libc::STDOUT_FILENO);
+                        dup2(pipe_fds[1], STDOUT_FILENO);
                     }
 
                     // Close unused fds in child
                     if let Some(fd) = previous_fd {
-                        libc::close(fd);
+                        close(fd);
                     }
                     if use_pipe {
-                        libc::close(pipe_fds[0]);
-                        libc::close(pipe_fds[1]);
+                        close(pipe_fds[0]);
+                        close(pipe_fds[1]);
                     }
 
                     // Prepare argv

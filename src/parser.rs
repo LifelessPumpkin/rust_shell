@@ -45,12 +45,6 @@ pub fn tokenize(input: &str) -> Vec<Token> {
 }
 
 pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
-
-	// •	When you see |, set the current CommandPart.direction = Some(Direction::Pipe)
-	// •	When you see >, expect next token to be a filename → RedirOut(filename)
-	// •	When you see <, same idea → RedirIn(filename)
-	// •	When you see &, set background = true
-
     let mut expanded_tokens: Vec<CString> = Vec::new();
     let mut prev_token: Option<Token> = None;
 
@@ -80,7 +74,15 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
                     expanded_tokens.push(program);
                     prev_token = Some(Token::Word(s));
                     continue;
-                } else {
+                } else if prev_token == Some(Token::RedirOut) || prev_token == Some(Token::RedirIn) {
+                    // It's a filename for redirection
+                    let filename = CString::new(s).unwrap();
+                    expanded_tokens.push(filename);
+                    prev_token = Some(Token::Word(String::new()));
+                    continue;
+                    
+                } 
+                else {
                     let arg = CString::new(s).unwrap();
                     expanded_tokens.push(arg);
                     // Reset prev_token to indicate we've consumed the argument
@@ -99,9 +101,15 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
                 expanded_tokens.push(pipe_token);
                 prev_token = Some(Token::Pipe);
             }
-            Token::RedirOut | Token::RedirIn => {
-                // Skip for now — handle in phase 2
-                prev_token = Some(token);
+            Token::RedirOut => {
+                // If it's a redirection, the next token should be a filename
+                expanded_tokens.push(CString::new(">").unwrap());
+                prev_token = Some(Token::RedirOut);
+            }
+            Token::RedirIn => {
+                // If it's a redirection, the next token should be a filename
+                expanded_tokens.push(CString::new("<").unwrap());
+                prev_token = Some(Token::RedirIn);
             }
             
             Token::Background => {
