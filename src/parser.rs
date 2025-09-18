@@ -28,15 +28,7 @@ impl PartialEq for Token {
 pub fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     // Split using whitespace, then match on special chars
-    // Expect only the first part to be a command, rest are args
-    // Unless they start with special chars
     for part in input.split_whitespace() {
-        // let is_first = tokens.is_empty();
-        // if is_first && (part == "|" || part == ">" || part == "<" || part == "&") {
-        //     // First token cannot be a special char
-        //     continue;
-        // }
-
         match part {
             "|" => tokens.push(Token::Pipe),
             ">" => tokens.push(Token::RedirOut),
@@ -81,6 +73,7 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
             Token::Word(s) => {
                 // If this is the first line or it follows a pipe, I need to search PATH for the executable
                 // Otherwise, it's just an argument
+                // If it follows a redirection, it's a filename, so just add it as an argument
                 if prev_token.is_none() || prev_token == Some(Token::Pipe) {
                     // Search PATH for executable
                     let program = resolve_path(&s);
@@ -106,8 +99,15 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
                 expanded_tokens.push(pipe_token);
                 prev_token = Some(Token::Pipe);
             }
-            Token::RedirOut | Token::RedirIn | Token::Background => {
+            Token::RedirOut | Token::RedirIn => {
                 // Skip for now — handle in phase 2
+                prev_token = Some(token);
+            }
+            
+            Token::Background => {
+                let bg_token = CString::new("&").unwrap();
+                expanded_tokens.push(bg_token);
+                prev_token = Some(Token::Background);
             }
         }
     }
@@ -132,9 +132,8 @@ fn resolve_path(s: &str) -> CString {
             // Check if the file exists and is executable
             if Path::new(&full_path).exists() {
                 let program = CString::new(full_path.as_str()).unwrap();
-                // expanded_tokens.push(program);
 
-                // break; // Exit the loop if the executable is found and executed
+                // Exit the loop if the executable is found and executed
                 return program;
             }
         }

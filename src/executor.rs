@@ -78,7 +78,13 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
         } else if t.to_str().unwrap() == "<" {
             // Handle input redirection
         } else if t.to_str().unwrap() == "&" {
-            // Handle background process
+            current_part.as_mut().unwrap().background = true;
+            // Remove the & from args
+            current_part.as_mut().unwrap().args.pop();
+            // Push the current part to the vector
+            command_parts.push(current_part.take().unwrap());
+            // Start a new command part
+            current_part = None;
         } else {
             // Handle argument
             // If it's the last token and current_part is Some, push the current part
@@ -137,7 +143,9 @@ fn execute(command_parts: Vec<CommandPart>) {
                 std::process::exit(1);
             } else { // Parent process
                 // To move things into bg i probably need to not wait here
-                waitpid(pid, ptr::null_mut(), 0);
+                if !command_parts[0].background {
+                    waitpid(pid, ptr::null_mut(), 0);
+                }
             }
         }
     } else {
@@ -208,7 +216,9 @@ fn execute(command_parts: Vec<CommandPart>) {
                     } else {
                         previous_fd = None;
                     }
-                    waitpid(pid, ptr::null_mut(), 0); // could be moved outside the loop if you want full parallel behavior
+                    if !part.background {
+                        waitpid(pid, ptr::null_mut(), 0);
+                    }
                 }
             }
         }
