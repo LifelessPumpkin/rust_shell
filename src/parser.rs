@@ -66,30 +66,19 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
             }
             Token::Word(s) => {
                 // If this is the first line or it follows a pipe, I need to search PATH for the executable
-                // Otherwise, it's just an argument
                 // If it follows a redirection, it's a filename, so just add it as an argument
+                // Otherwise, it's just an argument
                 if prev_token.is_none() || prev_token == Some(Token::Pipe) {
-                    // Search PATH for executable
                     let program = resolve_path(&s);
                     expanded_tokens.push(program);
                     prev_token = Some(Token::Word(s));
                     continue;
-                } else if prev_token == Some(Token::RedirOut) || prev_token == Some(Token::RedirIn) {
-                    // It's a filename for redirection
-                    let filename = CString::new(s).unwrap();
-                    expanded_tokens.push(filename);
-                    prev_token = Some(Token::Word(String::new()));
-                    continue;
-                    
-                } 
-                else {
+                } else {
                     let arg = CString::new(s).unwrap();
                     expanded_tokens.push(arg);
-                    // Reset prev_token to indicate we've consumed the argument
                     prev_token = Some(Token::Word(String::new()));
                     continue;
                 }
-
             }
             Token::Argument(s) => {
                 let arg = CString::new(s).unwrap();
@@ -111,7 +100,6 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
                 expanded_tokens.push(CString::new("<").unwrap());
                 prev_token = Some(Token::RedirIn);
             }
-            
             Token::Background => {
                 let bg_token = CString::new("&").unwrap();
                 expanded_tokens.push(bg_token);
@@ -130,23 +118,18 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
 
 fn resolve_path(s: &str) -> CString {
     if let Ok(path) = env::var("PATH") {
-        // Split the PATH variable into individual directories
         let paths: Vec<&str> = path.split(':').collect();
 
-        // Iterate through the paths
         for path in paths.iter() {
             let full_path = &format!("{}/{}", path, s);
 
-            // Check if the file exists and is executable
             if Path::new(&full_path).exists() {
                 let program = CString::new(full_path.as_str()).unwrap();
-
-                // Exit the loop if the executable is found and executed
                 return program;
             }
         }
     } else {
         println!("PATH environment variable is not set.");
     }
-    CString::new(s).unwrap() // Fallback to the original string if not found in PATH
+    CString::new(s).unwrap()
 }

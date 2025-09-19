@@ -54,7 +54,6 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
         // The rest are arguments until I hit a special token
 
         if current_part.is_none() {
-            // if it's the first token, it must be the program
             current_part = Some(CommandPart {
                 program: t.clone(),
                 args: Vec::new(),
@@ -64,21 +63,14 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
                 background: false,
             });
         } else {
-            // if it's not the first token, it must be an argument
             current_part.as_mut().unwrap().args.push(t.clone());
         }
 
         if t.to_str().unwrap() == "|" {
-            // In the previous if statement, I already added the pipe token as an argument
-            // So I need to remove it from the args vector
             current_part.as_mut().unwrap().args.pop();
-            // Add pipe direction to current part
             current_part.as_mut().unwrap().direction = Some(Direction::Pipe);
-            // Push the current part to the vector
             command_parts.push(current_part.take().unwrap());
-            // Start a new command part
             current_part = None;
-            // execute_piped(cmds);
         } else if t.to_str().unwrap() == ">" {
             current_part.as_mut().unwrap().args.pop(); // remove ">" from args
             if let Some(next_token) = tokens_iter.next() {
@@ -94,20 +86,19 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
             }
         } else if t.to_str().unwrap() == "&" {
             current_part.as_mut().unwrap().background = true;
-            // Remove the & from args
             current_part.as_mut().unwrap().args.pop();
-            // Push the current part to the vector
             command_parts.push(current_part.take().unwrap());
-            // Start a new command part
             current_part = None;
         } else {
-            // Handle argument
-            // If it's the last token and current_part is Some, push the current part
             if t == tokens.last().unwrap() && current_part.is_some() {
                 command_parts.push(current_part.take().unwrap());
             }
         }
     }
+    if let Some(final_part) = current_part.take() {
+            command_parts.push(final_part);
+        }
+    
     // For debugging purposes
     // println!("Interpreted Command Parts: ");
     // for part in command_parts.iter() {
@@ -118,11 +109,15 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
     //     if let Some(dir) = &part.direction {
     //         match dir {
     //             Direction::Pipe => println!("Direction: Pipe"),
-    //             Direction::RedirOut(file) => println!("Direction: RedirOut to {}", file),
-    //             Direction::RedirIn(file) => println!("Direction: RedirIn from {}", file),
     //         }
     //     } else {
     //         println!("Direction: None");
+    //     }
+    //     if let Some(redir_out) = &part.redir_out {
+    //         println!("Redir Out: {}", redir_out);
+    //     }
+    //     if let Some(redir_in) = &part.redir_in {
+    //         println!("Redir In: {}", redir_in);
     //     }
     //     println!("Background: {}", part.background);
     // }
@@ -134,30 +129,50 @@ fn execute(command_parts: Vec<CommandPart>) {
     // If there's only one command part, execute it normally
     if command_parts.len() == 1 {
         unsafe {
+            let cmd = &command_parts[0];
             let pid: i32 = fork();
             if pid < 0 {
                 eprintln!("Fork failed!");
             } else if pid == 0 { // Child process
-                // Put the program in the args
-                let mut argv = vec![command_parts[0].program.as_ptr()];
 
-                // Add the rest of the args
-                for arg in command_parts[0].args.iter() {
+                // ✅ Add this 👇
+                if let Some(filename) = &cmd.redir_out {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o644);
+                    if fd == -1 {
+                        panic!("open for redir out failed!");
+                    }
+                    dup2(fd, STDOUT_FILENO);
+                    close(fd);
+                }
+
+                if let Some(filename) = &cmd.redir_in {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_RDONLY);
+                    if fd == -1 {
+                        panic!("open for redir in failed!");
+                    }
+                    dup2(fd, STDIN_FILENO);
+                    close(fd);
+                }
+
+                // Build argv
+                let mut argv = vec![cmd.program.as_ptr()];
+                for arg in cmd.args.iter() {
                     argv.push(arg.as_ptr());
                 }
-                // Null terminate the args
                 argv.push(ptr::null());
-                execv(command_parts[0].program.as_ptr(), argv.as_ptr());
-                // If execv returns, it must have failed
+
+                execv(cmd.program.as_ptr(), argv.as_ptr());
+
                 eprintln!(
                     "execv failed for {}: {}",
-                    command_parts[0].program.to_str().unwrap(),
+                    cmd.program.to_str().unwrap(),
                     std::io::Error::last_os_error()
                 );
                 std::process::exit(1);
-            } else { // Parent process
-                // To move things into bg i probably need to not wait here
-                if !command_parts[0].background {
+            } else {
+                if !cmd.background {
                     waitpid(pid, ptr::null_mut(), 0);
                 }
             }
