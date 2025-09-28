@@ -2,6 +2,8 @@ use std::{ffi::CString, ptr};
 use libc::{close, dup2, open, fstat, stat as stat_t, O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY, STDIN_FILENO, STDOUT_FILENO, S_IFMT, S_IFREG, ENOENT};
 use nix::libc::{execv, fork, waitpid, pipe};
 use crate::parser::{expand_tokens, tokenize};
+use crate::job::JobTable;
+
 
 struct CommandPart {
     program: CString,
@@ -318,3 +320,137 @@ fn execute(command_parts: Vec<CommandPart>) {
         }
     }
 }
+
+
+//Public entry used by main.rs to execute a line and register background jobs
+pub fn execute_command_with_jobs(command: &str, jobs: &mut JobTable) {
+    // Phase 1: Tokenization and Expansion
+    let tokens: Vec<_> = tokenize(command);
+    let expanded_tokens: Vec<CString> = expand_tokens(tokens);
+
+    // Phase 2: Interpretation and Execution
+    let commands: Vec<CommandPart> = interpret_tokens(expanded_tokens);
+    execute_with_jobs(commands, jobs, command);
+}
+
+
+// Variant of execute() that also records background jobs
+fn execute_with_jobs(command_parts: Vec<CommandPart>, jobs: &mut JobTable, cmdline: &str) {
+    // Single command
+    if command_parts.len() == 1 {
+        unsafe {
+            let cmd = &command_parts[0];
+            if let Some(msg) = cmd.parse_error { eprintln!("redirection error: {}", msg); return; }
+            let pid: i32 = fork();
+            if pid < 0 {
+                eprintln!("Fork failed!");
+            } else if pid == 0 {
+                // CHILD: reuse your redirection + exec path
+                if let Some(filename) = &cmd.redir_out {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
+                    if fd == -1 { eprintln!("open failed for output '{}'", filename); std::process::exit(1); }
+                    dup2(fd, STDOUT_FILENO); close(fd);
+                }
+                if let Some(filename) = &cmd.redir_in {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_RDONLY);
+                    if fd == -1 { eprintln!("input file not found '{}'", filename); std::process::exit(1); }
+                    if !is_regular_fd(fd) { eprintln!("input is not a regular file '{}'", filename); close(fd); std::process::exit(1); }
+                    dup2(fd, STDIN_FILENO); close(fd);
+                }
+                let mut argv = vec![cmd.program.as_ptr()];
+                for arg in cmd.args.iter() { argv.push(arg.as_ptr()); }
+                argv.push(ptr::null());
+                execv(cmd.program.as_ptr(), argv.as_ptr());
+                let err = std::io::Error::last_os_error();
+                if let Some(code) = err.raw_os_error() { if code == ENOENT { eprintln!("command not found"); } else { eprintln!("exec failed: {}", err); } }
+                else { eprintln!("exec failed"); }
+                std::process::exit(127);
+            } else {
+                if cmd.background {
+                    // Register the background job (single command: child's PID)
+                    let _ = jobs.add_job(pid, cmdline.to_string());
+                } else {
+                    waitpid(pid, ptr::null_mut(), 0);
+                }
+            }
+        }
+        return;
+    }
+
+    // Pipeline (up to two pipes per spec)
+    let mut previous_fd: Option<i32> = None;
+    let mut last_pid: i32 = -1;
+    let mut last_part_background: bool = false;
+
+    for part in command_parts.iter() {
+        if let Some(msg) = part.parse_error { eprintln!("redirection error: {}", msg); return;}
+        let mut pipe_fds: [i32; 2] = [0; 2];
+        let use_pipe: bool = part.direction == Some(Direction::Pipe);
+        last_part_background = part.background; // only set on final part if '&' present
+
+        if use_pipe {
+            unsafe { if pipe(pipe_fds.as_mut_ptr()) == -1 { panic!("pipe failed!"); } }
+        }
+
+        unsafe {
+            let pid = fork();
+            if pid < 0 {
+                panic!("fork failed!");
+            } else if pid == 0 {
+                // CHILD: redirections
+                if let Some(filename) = &part.redir_out {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
+                    if fd == -1 { eprintln!("open failed for output '{}'", filename); std::process::exit(1); }
+                    dup2(fd, STDOUT_FILENO); close(fd);
+                }
+                if let Some(filename) = &part.redir_in {
+                    let file = CString::new(filename.clone()).unwrap();
+                    let fd = open(file.as_ptr(), O_RDONLY);
+                    if fd == -1 { eprintln!("input file not found '{}'", filename); std::process::exit(1); }
+                    if !is_regular_fd(fd) { eprintln!("input is not a regular file '{}'", filename); close(fd); std::process::exit(1); }
+                    dup2(fd, STDIN_FILENO); close(fd);
+                }
+                if let Some(fd) = previous_fd { dup2(fd, STDIN_FILENO); }
+                if use_pipe { dup2(pipe_fds[1], STDOUT_FILENO); }
+                if let Some(fd) = previous_fd { close(fd); }
+                if use_pipe { close(pipe_fds[0]); close(pipe_fds[1]); }
+
+                // exec
+                let mut argv = vec![part.program.as_ptr()];
+                for arg in &part.args { argv.push(arg.as_ptr()); }
+                argv.push(ptr::null());
+                execv(part.program.as_ptr(), argv.as_ptr());
+                let err = std::io::Error::last_os_error();
+                if let Some(code) = err.raw_os_error() { if code == ENOENT { eprintln!("command not found"); } else { eprintln!("exec failed: {}", err); } }
+                else { eprintln!("exec failed"); }
+                std::process::exit(127);
+            } else {
+                // PARENT
+                if let Some(fd) = previous_fd { libc::close(fd); }
+                if use_pipe {
+                    libc::close(pipe_fds[1]);
+                    previous_fd = Some(pipe_fds[0]);
+                } else {
+                    previous_fd = None;
+                }
+                last_pid = pid;
+            }
+        }
+    }
+
+    unsafe {
+        if last_part_background {
+            // Background pipeline: register last stage’s PID
+            let _ = jobs.add_job(last_pid, cmdline.to_string());
+        } else {
+            // Foreground pipeline: wait for the last stage (simple semantics)
+            waitpid(last_pid, ptr::null_mut(), 0);
+        }
+    }
+}
+
+
+
