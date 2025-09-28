@@ -1,5 +1,5 @@
 use std::{ffi::CString, ptr};
-use libc::{close, dup2, open, O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY, STDIN_FILENO, STDOUT_FILENO};
+use libc::{close, dup2, open, fstat, stat as stat_t, O_CREAT, O_RDONLY, O_TRUNC, O_WRONLY, STDIN_FILENO, STDOUT_FILENO, S_IFMT, S_IFREG, ENOENT};
 use nix::libc::{execv, fork, waitpid, pipe};
 use crate::parser::{expand_tokens, tokenize};
 
@@ -10,6 +10,7 @@ struct CommandPart {
     redir_out: Option<String>,  // e.g. > output.txt
     direction: Option<Direction>, // still keep this for pipes or future chaining
     background: bool,
+    parse_error: Option<&'static str>,  //for redirection issues
 }
 
 enum Direction {
@@ -61,6 +62,7 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
                 redir_out: None,
                 direction: None,
                 background: false,
+                parse_error: None,
             });
         } else {
             current_part.as_mut().unwrap().args.push(t.clone());
@@ -76,13 +78,16 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
             if let Some(next_token) = tokens_iter.next() {
                 let filename = next_token.to_str().unwrap().to_string();
                 current_part.as_mut().unwrap().redir_out = Some(filename);
+            } else {
+                current_part.as_mut().unwrap().parse_error = Some("missing output file after '>'");
             }
-        }
-        else if t.to_str().unwrap() == "<" {
+        } else if t.to_str().unwrap() == "<" {
             current_part.as_mut().unwrap().args.pop(); // remove "<" from args
             if let Some(next_token) = tokens_iter.next() {
                 let filename = next_token.to_str().unwrap().to_string();
                 current_part.as_mut().unwrap().redir_in = Some(filename);
+            } else {
+                current_part.as_mut().unwrap().parse_error = Some("missing input file after '<'");
             }
         } else if t.to_str().unwrap() == "&" {
             current_part.as_mut().unwrap().background = true;
@@ -124,23 +129,38 @@ fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
     command_parts
 }
 
+//verify that fd refers to regular file
+fn is_regular_fd(fd: i32) -> bool {
+    unsafe {
+        let mut st: stat_t = std::mem::zeroed();
+        if fstat(fd, &mut st) !=0 {
+            return false;
+        }
+        ((st.st_mode as u32) & (S_IFMT as u32)) == (S_IFREG as u32)
+    }
+}
+
 fn execute(command_parts: Vec<CommandPart>) {
 
     // If there's only one command part, execute it normally
     if command_parts.len() == 1 {
         unsafe {
             let cmd = &command_parts[0];
+            //bail early on parse error such as missing file name
+            if let Some(msg) = cmd.parse_error { eprintln!("redirection error: {}", msg); return; }
             let pid: i32 = fork();
             if pid < 0 {
                 eprintln!("Fork failed!");
             } else if pid == 0 { // Child process
 
-                // ✅ Add this 👇
+                // added this
                 if let Some(filename) = &cmd.redir_out {
                     let file = CString::new(filename.clone()).unwrap();
-                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o644);
+                    //mode 0600
+                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
                     if fd == -1 {
-                        panic!("open for redir out failed!");
+                        eprintln!("open failed for output '{}'", filename);
+                        std::process::exit(1);
                     }
                     dup2(fd, STDOUT_FILENO);
                     close(fd);
@@ -150,7 +170,14 @@ fn execute(command_parts: Vec<CommandPart>) {
                     let file = CString::new(filename.clone()).unwrap();
                     let fd = open(file.as_ptr(), O_RDONLY);
                     if fd == -1 {
-                        panic!("open for redir in failed!");
+                        eprintln!("input file not found '{}'", filename);
+                        std::process::exit(1);
+                    }
+                    //make sure regular file
+                    if !is_regular_fd(fd) {
+                        eprintln!("input is not a regular file '{}'", filename);
+                        close(fd);
+                        std::process::exit(1);
                     }
                     dup2(fd, STDIN_FILENO);
                     close(fd);
@@ -165,12 +192,18 @@ fn execute(command_parts: Vec<CommandPart>) {
 
                 execv(cmd.program.as_ptr(), argv.as_ptr());
 
-                eprintln!(
-                    "execv failed for {}: {}",
-                    cmd.program.to_str().unwrap(),
-                    std::io::Error::last_os_error()
-                );
-                std::process::exit(1);
+                //changed exec failure messages
+                let err = std::io::Error::last_os_error();
+                if let Some(code) = err.raw_os_error() {
+                    if code == ENOENT {
+                        eprintln!("command not found");
+                    } else {
+                        eprintln!("exec failed: {}", err);
+                    }
+                } else {
+                    eprintln!("exec failed");
+                }
+                std::process::exit(127);
             } else {
                 if !cmd.background {
                     waitpid(pid, ptr::null_mut(), 0);
@@ -181,6 +214,7 @@ fn execute(command_parts: Vec<CommandPart>) {
         let mut previous_fd: Option<i32> = None; // the read-end of the previous pipe
 
         for part in command_parts.iter() {
+            if let Some(msg) = part.parse_error { eprintln!("redirection error: {}", msg); return; }
             let mut pipe_fds: [i32; 2] = [0; 2];
             let use_pipe: bool = part.direction == Some(Direction::Pipe);
 
@@ -198,27 +232,33 @@ fn execute(command_parts: Vec<CommandPart>) {
                 if pid < 0 {
                     panic!("fork failed!");
                 } else if pid == 0 {
-                    // CHILD
-                if let Some(filename) = &part.redir_out {
-                    let file = CString::new(filename.clone()).unwrap();
-                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o644);
-                    if fd == -1 {
-                        panic!("open for redir out failed!");
+                    //CHILD
+                    if let Some(filename) = &part.redir_out {
+                        let file = CString::new(filename.clone()).unwrap();
+                        let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
+                        if fd == -1 {
+                            eprintln!("open failed for output '{}'", filename);
+                            std::process::exit(1);
+                        }
+                        dup2(fd, STDOUT_FILENO);
+                        close(fd);
                     }
-                    dup2(fd, STDOUT_FILENO);
-                    close(fd);
-                }
-
-                if let Some(filename) = &part.redir_in {
-                    let file = CString::new(filename.clone()).unwrap();
-                    let fd = open(file.as_ptr(), O_RDONLY);
-                    if fd == -1 {
-                        panic!("open for redir in failed!");
+                    if let Some(filename) = &part.redir_in {
+                        let file = CString::new(filename.clone()).unwrap();
+                        let fd = open(file.as_ptr(), O_RDONLY);
+                        if fd == -1 {
+                            eprintln!("input file not found '{}'", filename);
+                            std::process::exit(1);
+                        }
+                        if !is_regular_fd(fd) {
+                            eprintln!("input is not a regular file '{}'", filename);
+                            close(fd);
+                            std::process::exit(1);
+                        }
+                        dup2(fd, STDIN_FILENO);
+                        close(fd);
                     }
-                    dup2(fd, STDIN_FILENO);
-                    close(fd);
-                }
-
+                
                     // If there was a previous pipe, set stdin to its read end
                     if let Some(fd) = previous_fd {
                         dup2(fd, STDIN_FILENO);
@@ -247,12 +287,18 @@ fn execute(command_parts: Vec<CommandPart>) {
 
                     execv(part.program.as_ptr(), argv.as_ptr());
 
-                    eprintln!(
-                        "execv failed for {}: {}",
-                        part.program.to_str().unwrap(),
-                        std::io::Error::last_os_error()
-                    );
-                    std::process::exit(1);
+                    //friendly exec failure messages
+                    let err = std::io::Error::last_os_error();
+                    if let Some(code) = err.raw_os_error() {
+                        if code == ENOENT {
+                            eprintln!("command not found");
+                        } else {
+                            eprintln!("exec failed: {}", err);
+                        }
+                    } else {
+                        eprintln!("exec failed");
+                    }
+                    std::process::exit(127);
                 } else {
                     // PARENT
                     if let Some(fd) = previous_fd {
