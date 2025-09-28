@@ -59,9 +59,9 @@ fn create_prompt() {
         Err(_) => String::new(),
     };
 
-    let working_directory = match env::var(prompt[2]) {
-        Ok(val) => val,
-        Err(_) => String::new(),
+    let working_directory = match env::current_dir() {
+        Ok(path) => path.display().to_string(),
+        Err(_) => String::from("unknown"),
     };
 
     print!("{}@{}:{}>",user, machine,working_directory);
