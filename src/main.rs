@@ -1,12 +1,22 @@
 use std::io::{stdin, stdout, Write};
 use std::env;
-use executor::execute_command;
+use executor::execute_command_with_jobs;
 
 mod executor;
 mod parser;
+mod builtins;
+mod job;
+
+use builtins::{try_builtin, BuiltinResult, History};
+use job::JobTable;
 
 fn main() {
+    let mut jobs = JobTable::new();
+    let mut history = History::new();
+
     loop {
+        // poll for any completed background jobs before prompting
+        jobs.poll();
         create_prompt();
 
         let mut input: String = String::new();
@@ -16,11 +26,22 @@ fn main() {
         if command.is_empty() {
             continue;
         }
-        if command == "exit" {
-            break;
-        }
+        //if command == "exit" {
+          //  break;
+        //}
 
-        execute_command(command);
+        //execute_command(command);
+        // very simple tokenization for built-in detection only
+        let simple_tokens: Vec<String> = command.split_whitespace().map(|s| s.to_string()).collect();
+        match try_builtin(command, &simple_tokens, &mut jobs, &mut history) {
+            BuiltinResult::Handled => { continue; }
+            BuiltinResult::NotHandled => {
+                // execute external / pipelines / redirections / background
+                execute_command_with_jobs(command, &mut jobs);
+                // treat as valid for history purposes
+                history.push_valid(command);
+            }
+        }
     }
 }
 
