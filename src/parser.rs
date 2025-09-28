@@ -8,7 +8,7 @@ pub enum Token {
     RedirOut,
     RedirIn,
     Background,
-    Tilde
+    Tilde(String),
 }
 
 impl PartialEq for Token {
@@ -35,7 +35,7 @@ pub fn tokenize(input: &str) -> Vec<Token> {
             "<" => tokens.push(Token::RedirIn),
             "&" => tokens.push(Token::Background),
             // Only need to handle the ~ and ~/ case
-            t if t.starts_with('~') || t.starts_with("~/") => tokens.push(Token::Tilde), 
+            t if t.starts_with('~') || t.starts_with("~/") => tokens.push(Token::Tilde(part.to_string())), 
             p if p.starts_with('$') => tokens.push(Token::EnvVar(p[1..].to_string())),
             a if a.starts_with('-') => tokens.push(Token::Argument(part.to_string())),
             _ => tokens.push(Token::Word(part.to_string())),
@@ -55,15 +55,23 @@ pub fn expand_tokens(tokens: Vec<Token>) -> Vec<CString> {
                     expanded_tokens.push(CString::new(val).unwrap());
                     prev_token = Some(Token::EnvVar(name));
                 } else {
-                    expanded_tokens.push(CString::new(format!("Environment Variable Not Found")).unwrap());
+                    expanded_tokens.push(CString::new("").unwrap());
                     prev_token = Some(Token::EnvVar(name));
                 }
             }
-            Token::Tilde => {
-                let home = env::var("HOME").unwrap();
-                expanded_tokens.push(CString::new(home).unwrap());
-                prev_token = Some(Token::Tilde);
+            Token::Tilde(s) => {
+                let home = env::var("HOME").unwrap_or_else(|_| String::from("/"));
+                if s == "~" {
+                    expanded_tokens.push(CString::new(home).unwrap());
+                } else if let Some(rest) = s.strip_prefix("~/") {
+                    let full = format!("{}/{}", home, rest);
+                    expanded_tokens.push(CString::new(full).unwrap());
+                } else {
+                    expanded_tokens.push(CString::new(s.clone()).unwrap());
+                }
+                prev_token = Some(Token::Tilde(s));
             }
+
             Token::Word(s) => {
                 // If this is the first line or it follows a pipe, I need to search PATH for the executable
                 // If it follows a redirection, it's a filename, so just add it as an argument
