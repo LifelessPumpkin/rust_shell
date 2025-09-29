@@ -1,6 +1,6 @@
 ## Project Documentation
 
-- [Division of Labor](Doc/division-of-labor.pdf)
+[Division of Labor](Doc/division-of-labor.pdf)
 
 ## File Structure
 - `src/` - Source code directory
