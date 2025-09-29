@@ -30,15 +30,8 @@ cargo build --release
 ```
 ### Running The Program (and alternative methods)
 ```bash
-cargo run
+cargo run --release
 
-cargo run < input.txt
-
-./target/release/[your-project-name]
-```
-Running with Input/Output Redirection
-```bash
-cargo run < input.txt > output.txt
 ```
 
 - [Development Log]
