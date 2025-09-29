@@ -28,7 +28,7 @@
 ```bash
 cargo build --release
 ```
-### Running The Program (and alternative methods)
+### Running The Program
 ```bash
 cargo run --release
 
