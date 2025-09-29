@@ -45,6 +45,7 @@ cargo run < input.txt > output.txt
 
 ## Group Meetings
 
+
 ## Extra Credit
 We have implemented all three optional Extra Credit functionalities
 * Support unlimited number of pipes [2]
