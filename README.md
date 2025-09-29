@@ -3,25 +3,38 @@
 [Division of Labor](Doc/division-of-labor.pdf)
 
 ## File Structure
-- `src/` - Source code directory
+- `src/` - Source code dir
   - `main.rs` - Entry point of the program
   - `parser.rs` - Parses input job specifications
   - `job.rs` - Job data structure and related functions
   - `executor.rs` - Handles job execution logic
   - `builtins.rs` - Built-in command implementations
-  - `job.rs.swo` - Swap file (temporary editor file)
+  - `job.rs.swo` - Swap file, temporary editor file
   - `in` - Input file
   - `out` - Output file
-- `Doc/` - Documentation directory
+- `Doc/` - Documentation dir for uploading files for ease of use
   - `division-of-labor.pdf` - Team responsibilities
-  - `test` - Test documentation/files
 - `Cargo.toml` - Rust project configuration and dependencies
-- `Cargo.lock` - Locked dependency versions
-- `input.txt` - Sample input file
+- `Cargo.lock` - dependency versions
+- `input.txt` -  Sample input file
 - `output.txt` - Sample output file
 - `.gitignore` - Git ignore rules
 
 ## How to Compile and Run
+### Prerequisites
+- Rust toolchain (install from https://rustup.rs/)
+
+### Compilation
+```bash
+cargo build --release
+```
+```bash
+cargo run or cargo run < input.txt or ./target/release/[your-project-name]
+```
+Running with Input/Output Redirection
+```bash
+cargo run < input.txt > output.txt
+```
 
 - [Development Log]
 
