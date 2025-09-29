@@ -44,7 +44,7 @@ cargo run < input.txt > output.txt
 - [Development Log]
 
 ## Group Meetings
-
+Our meetings mainly took place over the phone, and those meetings consisted of check-ins to talk about the project and our progress with our respective parts of the project. If anyone was struggling this was also the time to think about a solution all together and fix the issues.
 
 ## Extra Credit
 We have implemented all three optional Extra Credit functionalities
