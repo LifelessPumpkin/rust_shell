@@ -37,15 +37,15 @@ impl PartialEq for Direction {
     }
 }
 
-pub fn execute_command(command: &str) {
-    // Phase 1: Tokenization and Expansion
-    let tokens: Vec<_> = tokenize(command);
-    let expanded_tokens: Vec<CString> = expand_tokens(tokens);
+// pub fn execute_command(command: &str) {
+//     // Phase 1: Tokenization and Expansion
+//     let tokens: Vec<_> = tokenize(command);
+//     let expanded_tokens: Vec<CString> = expand_tokens(tokens);
 
-    // Phase 2: Interpretation and Execution
-    let commands: Vec<CommandPart> = interpret_tokens(expanded_tokens);
-    execute(commands);
-}
+//     // Phase 2: Interpretation and Execution
+//     let commands: Vec<CommandPart> = interpret_tokens(expanded_tokens);
+//     execute(commands);
+// }
 
 fn interpret_tokens(tokens: Vec<CString>) -> Vec<CommandPart> {
     let mut command_parts: Vec<CommandPart> = Vec::new();
@@ -142,184 +142,184 @@ fn is_regular_fd(fd: i32) -> bool {
     }
 }
 
-fn execute(command_parts: Vec<CommandPart>) {
+// fn execute(command_parts: Vec<CommandPart>) {
 
-    // If there's only one command part, execute it normally
-    if command_parts.len() == 1 {
-        unsafe {
-            let cmd = &command_parts[0];
-            //bail early on parse error such as missing file name
-            if let Some(msg) = cmd.parse_error { eprintln!("redirection error: {}", msg); return; }
-            let pid: i32 = fork();
-            if pid < 0 {
-                eprintln!("Fork failed!");
-            } else if pid == 0 { // Child process
+//     // If there's only one command part, execute it normally
+//     if command_parts.len() == 1 {
+//         unsafe {
+//             let cmd = &command_parts[0];
+//             //bail early on parse error such as missing file name
+//             if let Some(msg) = cmd.parse_error { eprintln!("redirection error: {}", msg); return; }
+//             let pid: i32 = fork();
+//             if pid < 0 {
+//                 eprintln!("Fork failed!");
+//             } else if pid == 0 { // Child process
 
-                // added this
-                if let Some(filename) = &cmd.redir_out {
-                    let file = CString::new(filename.clone()).unwrap();
-                    //mode 0600
-                    let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
-                    if fd == -1 {
-                        eprintln!("open failed for output '{}'", filename);
-                        std::process::exit(1);
-                    }
-                    dup2(fd, STDOUT_FILENO);
-                    close(fd);
-                }
+//                 // added this
+//                 if let Some(filename) = &cmd.redir_out {
+//                     let file = CString::new(filename.clone()).unwrap();
+//                     //mode 0600
+//                     let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
+//                     if fd == -1 {
+//                         eprintln!("open failed for output '{}'", filename);
+//                         std::process::exit(1);
+//                     }
+//                     dup2(fd, STDOUT_FILENO);
+//                     close(fd);
+//                 }
 
-                if let Some(filename) = &cmd.redir_in {
-                    let file = CString::new(filename.clone()).unwrap();
-                    let fd = open(file.as_ptr(), O_RDONLY);
-                    if fd == -1 {
-                        eprintln!("input file not found '{}'", filename);
-                        std::process::exit(1);
-                    }
-                    //make sure regular file
-                    if !is_regular_fd(fd) {
-                        eprintln!("input is not a regular file '{}'", filename);
-                        close(fd);
-                        std::process::exit(1);
-                    }
-                    dup2(fd, STDIN_FILENO);
-                    close(fd);
-                }
+//                 if let Some(filename) = &cmd.redir_in {
+//                     let file = CString::new(filename.clone()).unwrap();
+//                     let fd = open(file.as_ptr(), O_RDONLY);
+//                     if fd == -1 {
+//                         eprintln!("input file not found '{}'", filename);
+//                         std::process::exit(1);
+//                     }
+//                     //make sure regular file
+//                     if !is_regular_fd(fd) {
+//                         eprintln!("input is not a regular file '{}'", filename);
+//                         close(fd);
+//                         std::process::exit(1);
+//                     }
+//                     dup2(fd, STDIN_FILENO);
+//                     close(fd);
+//                 }
 
-                // Build argv
-                let mut argv = vec![cmd.program.as_ptr()];
-                for arg in cmd.args.iter() {
-                    argv.push(arg.as_ptr());
-                }
-                argv.push(ptr::null());
+//                 // Build argv
+//                 let mut argv = vec![cmd.program.as_ptr()];
+//                 for arg in cmd.args.iter() {
+//                     argv.push(arg.as_ptr());
+//                 }
+//                 argv.push(ptr::null());
 
-                execv(cmd.program.as_ptr(), argv.as_ptr());
+//                 execv(cmd.program.as_ptr(), argv.as_ptr());
 
-                //changed exec failure messages
-                let err = std::io::Error::last_os_error();
-                if let Some(code) = err.raw_os_error() {
-                    if code == ENOENT {
-                        eprintln!("command not found");
-                    } else {
-                        eprintln!("exec failed: {}", err);
-                    }
-                } else {
-                    eprintln!("exec failed");
-                }
-                std::process::exit(127);
-            } else {
-                if !cmd.background {
-                    waitpid(pid, ptr::null_mut(), 0);
-                }
-            }
-        }
-    } else {
-        let mut previous_fd: Option<i32> = None; // the read-end of the previous pipe
+//                 //changed exec failure messages
+//                 let err = std::io::Error::last_os_error();
+//                 if let Some(code) = err.raw_os_error() {
+//                     if code == ENOENT {
+//                         eprintln!("command not found");
+//                     } else {
+//                         eprintln!("exec failed: {}", err);
+//                     }
+//                 } else {
+//                     eprintln!("exec failed");
+//                 }
+//                 std::process::exit(127);
+//             } else {
+//                 if !cmd.background {
+//                     waitpid(pid, ptr::null_mut(), 0);
+//                 }
+//             }
+//         }
+//     } else {
+//         let mut previous_fd: Option<i32> = None; // the read-end of the previous pipe
 
-        for part in command_parts.iter() {
-            if let Some(msg) = part.parse_error { eprintln!("redirection error: {}", msg); return; }
-            let mut pipe_fds: [i32; 2] = [0; 2];
-            let use_pipe: bool = part.direction == Some(Direction::Pipe);
+//         for part in command_parts.iter() {
+//             if let Some(msg) = part.parse_error { eprintln!("redirection error: {}", msg); return; }
+//             let mut pipe_fds: [i32; 2] = [0; 2];
+//             let use_pipe: bool = part.direction == Some(Direction::Pipe);
 
-            // Create a pipe only if this command is piping to the next
-            if use_pipe {
-                unsafe {
-                    if pipe(pipe_fds.as_mut_ptr()) == -1 {
-                        panic!("pipe failed!");
-                    }
-                }
-            }
+//             // Create a pipe only if this command is piping to the next
+//             if use_pipe {
+//                 unsafe {
+//                     if pipe(pipe_fds.as_mut_ptr()) == -1 {
+//                         panic!("pipe failed!");
+//                     }
+//                 }
+//             }
 
-            unsafe {
-                let pid = fork();
-                if pid < 0 {
-                    panic!("fork failed!");
-                } else if pid == 0 {
-                    //CHILD
-                    if let Some(filename) = &part.redir_out {
-                        let file = CString::new(filename.clone()).unwrap();
-                        let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
-                        if fd == -1 {
-                            eprintln!("open failed for output '{}'", filename);
-                            std::process::exit(1);
-                        }
-                        dup2(fd, STDOUT_FILENO);
-                        close(fd);
-                    }
-                    if let Some(filename) = &part.redir_in {
-                        let file = CString::new(filename.clone()).unwrap();
-                        let fd = open(file.as_ptr(), O_RDONLY);
-                        if fd == -1 {
-                            eprintln!("input file not found '{}'", filename);
-                            std::process::exit(1);
-                        }
-                        if !is_regular_fd(fd) {
-                            eprintln!("input is not a regular file '{}'", filename);
-                            close(fd);
-                            std::process::exit(1);
-                        }
-                        dup2(fd, STDIN_FILENO);
-                        close(fd);
-                    }
+//             unsafe {
+//                 let pid = fork();
+//                 if pid < 0 {
+//                     panic!("fork failed!");
+//                 } else if pid == 0 {
+//                     //CHILD
+//                     if let Some(filename) = &part.redir_out {
+//                         let file = CString::new(filename.clone()).unwrap();
+//                         let fd = open(file.as_ptr(), O_WRONLY | O_CREAT | O_TRUNC, 0o600);
+//                         if fd == -1 {
+//                             eprintln!("open failed for output '{}'", filename);
+//                             std::process::exit(1);
+//                         }
+//                         dup2(fd, STDOUT_FILENO);
+//                         close(fd);
+//                     }
+//                     if let Some(filename) = &part.redir_in {
+//                         let file = CString::new(filename.clone()).unwrap();
+//                         let fd = open(file.as_ptr(), O_RDONLY);
+//                         if fd == -1 {
+//                             eprintln!("input file not found '{}'", filename);
+//                             std::process::exit(1);
+//                         }
+//                         if !is_regular_fd(fd) {
+//                             eprintln!("input is not a regular file '{}'", filename);
+//                             close(fd);
+//                             std::process::exit(1);
+//                         }
+//                         dup2(fd, STDIN_FILENO);
+//                         close(fd);
+//                     }
                 
-                    // If there was a previous pipe, set stdin to its read end
-                    if let Some(fd) = previous_fd {
-                        dup2(fd, STDIN_FILENO);
-                    }
+//                     // If there was a previous pipe, set stdin to its read end
+//                     if let Some(fd) = previous_fd {
+//                         dup2(fd, STDIN_FILENO);
+//                     }
 
-                    // If we're piping to the next, set stdout to this pipe's write end
-                    if use_pipe {
-                        dup2(pipe_fds[1], STDOUT_FILENO);
-                    }
+//                     // If we're piping to the next, set stdout to this pipe's write end
+//                     if use_pipe {
+//                         dup2(pipe_fds[1], STDOUT_FILENO);
+//                     }
 
-                    // Close unused fds in child
-                    if let Some(fd) = previous_fd {
-                        close(fd);
-                    }
-                    if use_pipe {
-                        close(pipe_fds[0]);
-                        close(pipe_fds[1]);
-                    }
+//                     // Close unused fds in child
+//                     if let Some(fd) = previous_fd {
+//                         close(fd);
+//                     }
+//                     if use_pipe {
+//                         close(pipe_fds[0]);
+//                         close(pipe_fds[1]);
+//                     }
 
-                    // Prepare argv
-                    let mut argv = vec![part.program.as_ptr()];
-                    for arg in &part.args {
-                        argv.push(arg.as_ptr());
-                    }
-                    argv.push(ptr::null());
+//                     // Prepare argv
+//                     let mut argv = vec![part.program.as_ptr()];
+//                     for arg in &part.args {
+//                         argv.push(arg.as_ptr());
+//                     }
+//                     argv.push(ptr::null());
 
-                    execv(part.program.as_ptr(), argv.as_ptr());
+//                     execv(part.program.as_ptr(), argv.as_ptr());
 
-                    //friendly exec failure messages
-                    let err = std::io::Error::last_os_error();
-                    if let Some(code) = err.raw_os_error() {
-                        if code == ENOENT {
-                            eprintln!("command not found");
-                        } else {
-                            eprintln!("exec failed: {}", err);
-                        }
-                    } else {
-                        eprintln!("exec failed");
-                    }
-                    std::process::exit(127);
-                } else {
-                    // PARENT
-                    if let Some(fd) = previous_fd {
-                        libc::close(fd); // close previous pipe's read end
-                    }
-                    if use_pipe {
-                        libc::close(pipe_fds[1]); // close write end in parent
-                        previous_fd = Some(pipe_fds[0]); // keep read end for next iteration
-                    } else {
-                        previous_fd = None;
-                    }
-                    if !part.background {
-                        waitpid(pid, ptr::null_mut(), 0);
-                    }
-                }
-            }
-        }
-    }
-}
+//                     //friendly exec failure messages
+//                     let err = std::io::Error::last_os_error();
+//                     if let Some(code) = err.raw_os_error() {
+//                         if code == ENOENT {
+//                             eprintln!("command not found");
+//                         } else {
+//                             eprintln!("exec failed: {}", err);
+//                         }
+//                     } else {
+//                         eprintln!("exec failed");
+//                     }
+//                     std::process::exit(127);
+//                 } else {
+//                     // PARENT
+//                     if let Some(fd) = previous_fd {
+//                         libc::close(fd); // close previous pipe's read end
+//                     }
+//                     if use_pipe {
+//                         libc::close(pipe_fds[1]); // close write end in parent
+//                         previous_fd = Some(pipe_fds[0]); // keep read end for next iteration
+//                     } else {
+//                         previous_fd = None;
+//                     }
+//                     if !part.background {
+//                         waitpid(pid, ptr::null_mut(), 0);
+//                     }
+//                 }
+//             }
+//         }
+//     }
+// }
 
 
 //Public entry used by main.rs to execute a line and register background jobs

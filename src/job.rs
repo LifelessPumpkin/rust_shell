@@ -21,9 +21,9 @@ impl JobTable {
         self.jobs.iter().any(|j| j.running)
     }
 
-    pub fn running_pids(&self) -> Vec<i32> {
-        self.jobs.iter().filter(|j| j.running).map(|j| j.pid).collect()
-    }
+    // pub fn running_pids(&self) -> Vec<i32> {
+    //     self.jobs.iter().filter(|j| j.running).map(|j| j.pid).collect()
+    // }
 
     /// Add a background job if under the 10-job limit.
     /// Prints: `[job_id] PID`

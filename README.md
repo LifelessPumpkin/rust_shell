@@ -1,6 +1,12 @@
 ## Project Documentation
-
+### Division of Labor
+#### Before
 [Division of Labor](Doc/division-of-labor.pdf)
+
+#### After
+- Parts 1-8 -> Logan
+- Part 9, testing, debugging -> Brooks
+- Documentation -> Shawn
 
 ## File Structure
 - `src/` - Source code dir
