@@ -8,3 +8,6 @@
 - [Development Log]
 
 ## Group Meetings
+
+## Extra Credit
+We have implemented all three optional Extra Credit functionalities
