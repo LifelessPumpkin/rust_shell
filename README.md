@@ -31,9 +31,9 @@ cargo build --release
 ### Running The Program (and alternative methods)
 ```bash
 cargo run
-or
+
 cargo run < input.txt
-or
+
 ./target/release/[your-project-name]
 ```
 Running with Input/Output Redirection
